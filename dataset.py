@@ -55,51 +55,145 @@ class PDB(Dataset):
             'edge':seq.edge,
         }
         
+#if __name__ == "__main__":
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument('--root', type=str, default='./data/BCE_633', help='dataset path')
+#     parser.add_argument('--gpu', type=int, default=0, help='gpu.')
+#     args = parser.parse_args()
+#     root = args.root
+#     device='cpu' if args.gpu==-1 else f'cuda:{args.gpu}'
+    
+#     os.system(f'cd {root} && mkdir PDB purePDB feat dssp graph')
+#     # model=None
+#     model,_=esm.pretrained.esm2_t36_3B_UR50D()
+#     model=model.to(device)
+#     model.eval()
+#     train='total.csv'
+#     initial(train,root,model,device)
+#     with open(f'{root}/total.pkl','rb') as f:
+#         dataset=pk.load(f)
+#     dates={i.name:i.date for i in dataset}
+# #     with open(f'{root}/date.pkl','rb') as f:
+# #         dates=pk.load(f)
+#     filt_data=[]
+#     for i in dataset:
+#         if len(i)<1024 and i.label.sum()>0:
+#             filt_data.append(i)
+#     month={'JAN':1,'FEB':2,'MAR':3,'APR':4,'MAY':5,'JUN':6,'JUL':7,'AUG':8,'SEP':9,'OCT':10,'NOV':11,'DEC':12}
+#     trainset,valset,testset=[],[],[]
+#     D,M,Y=[],[],[]
+#     test=20210401
+#     dates_=[]
+#     for i in filt_data:
+#         d,m,y=dates[i.name]
+#         d,m,y=int(d),month[m],int(y)
+#         if y<23:
+#             y+=2000
+#         else:
+#             y+=1900
+#         date=y*10000+m*100+d
+#         if date<test:
+#             dates_.append(date)
+#             trainset.append(i)
+#         else:
+#             testset.append(i)
+#     with open(f'{root}/train.pkl','wb') as f:
+#         pk.dump(trainset,f)
+#     with open(f'{root}/test.pkl','wb') as f:
+#         pk.dump(testset,f)
+#     idx=np.array(dates_).argsort()
+#     np.save(f'{root}/cross-validation.npy',idx)
 if __name__ == "__main__":
+    import pickle as pk
+    import numpy as np
+    from tqdm import tqdm
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', type=str, default='./data/BCE_633', help='dataset path')
-    parser.add_argument('--gpu', type=int, default=0, help='gpu.')
+    parser.add_argument('--gpu', type=int, default=0, help='gpu index, -1 for cpu')
+    parser.add_argument('--esm_size', type=str, default='650M', choices=['150M','650M','3B'],
+                        help='ESM-2 variant: 150M | 650M | 3B')
+    parser.add_argument('--cache', type=str, default='/kaggle/working/graphbepi_cache',
+                        help='TORCH_HOME model cache path')
     args = parser.parse_args()
+
+    # 1) Cache cho ESM (để lần sau không tải lại)
+    if args.cache:
+        os.environ['TORCH_HOME'] = args.cache
+        os.makedirs(args.cache, exist_ok=True)
+        print(f"[INFO] TORCH_HOME = {os.environ['TORCH_HOME']}")
+
+    # 2) Bảo đảm thư mục tồn tại (không dùng 'cd && mkdir')
     root = args.root
-    device='cpu' if args.gpu==-1 else f'cuda:{args.gpu}'
-    
-    os.system(f'cd {root} && mkdir PDB purePDB feat dssp graph')
-    # model=None
-    model,_=esm.pretrained.esm2_t36_3B_UR50D()
-    model=model.to(device)
+    for d in [root, f'{root}/PDB', f'{root}/purePDB', f'{root}/feat', f'{root}/dssp', f'{root}/graph']:
+        os.makedirs(d, exist_ok=True)
+    print(f"[INFO] Prepared folders under {root}")
+
+    # 3) Chọn device an toàn
+    if args.gpu == -1 or (not torch.cuda.is_available()):
+        device = 'cpu'
+    else:
+        n = torch.cuda.device_count()
+        device = f'cuda:{args.gpu}' if 0 <= args.gpu < n else 'cpu'
+    print(f"[INFO] Device: {device}")
+
+    # 4) Tải ESM-2 (mặc định 650M cho Kaggle)
+    try:
+        if args.esm_size == '3B':
+            print("[INFO] Loading ESM-2 t36_3B_UR50D (large)")
+            model, _ = esm.pretrained.esm2_t36_3B_UR50D()
+        elif args.esm_size == '150M':
+            print("[INFO] Loading ESM-2 t30_150M_UR50D")
+            model, _ = esm.pretrained.esm2_t30_150M_UR50D()
+        else:
+            print("[INFO] Loading ESM-2 t33_650M_UR50D (recommended)")
+            model, _ = esm.pretrained.esm2_t33_650M_UR50D()
+    except Exception as e:
+        print("[ERROR] Failed to load ESM-2:", repr(e))
+        raise
+
+    model = model.to(device)
     model.eval()
-    train='total.csv'
-    initial(train,root,model,device)
+
+    # 5) Build dataset (đọc 'total.csv' ở thư mục làm việc hiện tại)
+    csv_path = 'total.csv'
+    if not os.path.exists(csv_path):
+        print(f"[WARN] {csv_path} not found. Check your working directory.")
+    try:
+        initial(csv_path, root, model, device)  # hàm trong utils.py
+    except Exception as e:
+        print("[ERROR] initial() failed:", repr(e))
+        raise
+
+    # 6) Tách train/test theo mốc 2021-04-01
     with open(f'{root}/total.pkl','rb') as f:
-        dataset=pk.load(f)
-    dates={i.name:i.date for i in dataset}
-#     with open(f'{root}/date.pkl','rb') as f:
-#         dates=pk.load(f)
-    filt_data=[]
-    for i in dataset:
-        if len(i)<1024 and i.label.sum()>0:
-            filt_data.append(i)
-    month={'JAN':1,'FEB':2,'MAR':3,'APR':4,'MAY':5,'JUN':6,'JUL':7,'AUG':8,'SEP':9,'OCT':10,'NOV':11,'DEC':12}
-    trainset,valset,testset=[],[],[]
-    D,M,Y=[],[],[]
-    test=20210401
-    dates_=[]
-    for i in filt_data:
-        d,m,y=dates[i.name]
-        d,m,y=int(d),month[m],int(y)
-        if y<23:
-            y+=2000
+        dataset = pk.load(f)
+    dates = {i.name: i.date for i in dataset}
+
+    filt_data = [i for i in dataset if len(i) < 1024 and getattr(i, 'label', None) is not None and i.label.sum() > 0]
+    month = {'JAN':1,'FEB':2,'MAR':3,'APR':4,'MAY':5,'JUN':6,'JUL':7,'AUG':8,'SEP':9,'OCT':10,'NOV':11,'DEC':12}
+    trainset, testset, DATES_FOR_CV = [], [], []
+    TEST_CUTOFF = 20210401
+
+    for it in filt_data:
+        d, m, y = dates[it.name]
+        d = int(d)
+        m = month[str(m).upper()]
+        y = int(y); y = 2000 + y if y < 23 else 1900 + y
+        date_int = y*10000 + m*100 + d
+
+        if date_int < TEST_CUTOFF:
+            DATES_FOR_CV.append(date_int)
+            trainset.append(it)
         else:
-            y+=1900
-        date=y*10000+m*100+d
-        if date<test:
-            dates_.append(date)
-            trainset.append(i)
-        else:
-            testset.append(i)
+            testset.append(it)
+
     with open(f'{root}/train.pkl','wb') as f:
-        pk.dump(trainset,f)
+        pk.dump(trainset, f)
     with open(f'{root}/test.pkl','wb') as f:
-        pk.dump(testset,f)
-    idx=np.array(dates_).argsort()
-    np.save(f'{root}/cross-validation.npy',idx)
+        pk.dump(testset, f)
+
+    idx = np.array(DATES_FOR_CV).argsort()
+    np.save(f'{root}/cross-validation.npy', idx)
+    print(f"[INFO] Done. Train: {len(trainset)}, Test: {len(testset)}, CV idx shape: {idx.shape}")
+

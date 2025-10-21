@@ -8,6 +8,59 @@ import torch.nn.functional as F
 from tqdm import tqdm,trange
 from preprocess import *
 from graph_construction import calcPROgraph
+
+# ==== Added robust PDB downloader (GraphBepi Kaggle fix) ====
+import requests, time, gzip, shutil, io
+from urllib3.util.retry import Retry
+from requests.adapters import HTTPAdapter
+
+def _requests_session(max_retries=5, backoff_factor=0.5):
+    r = Retry(
+        total=max_retries,
+        read=max_retries,
+        connect=max_retries,
+        backoff_factor=backoff_factor,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset(['GET', 'HEAD'])
+    )
+    s = requests.Session()
+    s.headers.update({"User-Agent": "GraphBepi/1.0 (+https://github.com/biomed-AI/GraphBepi)"})
+    s.mount("https://", HTTPAdapter(max_retries=r))
+    s.mount("http://", HTTPAdapter(max_retries=r))
+    return s
+
+def download_pdb_with_fallback(pdb_id_4, out_pdb_path):
+    """
+    Tải file PDB hoặc CIF ổn định hơn cho Kaggle.
+    """
+    pdb = pdb_id_4.lower()
+    sess = _requests_session()
+
+    urls = [
+        f"https://files.rcsb.org/download/{pdb}.pdb",
+        f"https://files.rcsb.org/download/{pdb}.cif",
+        f"https://files.wwpdb.org/pub/pdb/data/structures/divided/pdb/{pdb[1:3]}/pdb{pdb}.ent.gz"
+    ]
+    for url in urls:
+        try:
+            resp = sess.get(url, timeout=60, stream=True)
+            if resp.status_code != 200:
+                continue
+            if url.endswith(".gz"):
+                with gzip.GzipFile(fileobj=io.BytesIO(resp.content)) as gz, open(out_pdb_path, "wb") as fo:
+                    shutil.copyfileobj(gz, fo)
+                return True
+            with open(out_pdb_path, "wb") as fo:
+                for chunk in resp.iter_content(chunk_size=1 << 20):
+                    if chunk:
+                        fo.write(chunk)
+            return True
+        except Exception:
+            time.sleep(0.5)
+            continue
+    return False
+# ============================================================
+
 # prot_amino2id={
 #     '<pad>': 0, '</s>': 1, '<unk>': 2, 'A': 3,
 #     'L': 4, 'G': 5, 'V': 6, 'S': 7,
@@ -118,23 +171,32 @@ def collate_fn(batch):
 def extract_chain(root,pid,chain,force=False):
     if not force and os.path.exists(f'{root}/purePDB/{pid}_{chain}.pdb'):
         return True
+    # if not os.path.exists(f'{root}/PDB/{pid}.pdb'):
+    #     retry=5
+    #     pdb=None
+    #     while retry>0:
+    #         try:
+    #             with rq.get(f'https://files.rcsb.org/download/{pid}.pdb') as f:
+    #                 if f.status_code==200:
+    #                     pdb=f.content
+    #                     break
+    #         except:
+    #             retry-=1
+    #             continue
+    #     if pdb is None:
+    #         print(f'PDB file {pid} failed to download')
+    #         return False
+    #     with open(f'{root}/PDB/{pid}.pdb','wb') as f:
+    #         f.write(pdb)
+
     if not os.path.exists(f'{root}/PDB/{pid}.pdb'):
-        retry=5
-        pdb=None
-        while retry>0:
-            try:
-                with rq.get(f'https://files.rcsb.org/download/{pid}.pdb') as f:
-                    if f.status_code==200:
-                        pdb=f.content
-                        break
-            except:
-                retry-=1
-                continue
-        if pdb is None:
-            print(f'PDB file {pid} failed to download')
+        os.makedirs(f'{root}/PDB', exist_ok=True)
+        out_pdb = f'{root}/PDB/{pid}.pdb'
+        ok = download_pdb_with_fallback(pid, out_pdb)
+        if not ok:
+            print(f'PDB file {pid} failed to download (after retries)')
             return False
-        with open(f'{root}/PDB/{pid}.pdb','wb') as f:
-            f.write(pdb)
+
     lines=[]
     with open(f'{root}/PDB/{pid}.pdb','r') as f:
         for line in f:
