@@ -4,6 +4,7 @@ import torch
 import warnings
 import argparse
 import torch.nn as nn
+import re 
 import torch.nn.functional as F
 from utils import *
 from torch.utils.data import DataLoader,Dataset
@@ -175,18 +176,59 @@ if __name__ == "__main__":
     trainset, testset, DATES_FOR_CV = [], [], []
     TEST_CUTOFF = 20210401
 
-    for it in filt_data:
-        d, m, y = dates[it.name]
-        d = int(d)
-        m = month[str(m).upper()]
-        y = int(y); y = 2000 + y if y < 23 else 1900 + y
-        date_int = y*10000 + m*100 + d
+    # for it in filt_data:
+    #     d, m, y = dates[it.name]
+    #     d = int(d)
+    #     m = month[str(m).upper()]
+    #     y = int(y); y = 2000 + y if y < 23 else 1900 + y
+    #     date_int = y*10000 + m*100 + d
 
-        if date_int < TEST_CUTOFF:
-            DATES_FOR_CV.append(date_int)
+    #     if date_int < TEST_CUTOFF:
+    #         DATES_FOR_CV.append(date_int)
+    #         trainset.append(it)
+    #     else:
+    #         testset.append(it)
+
+    
+
+    TEST_CUTOFF = 20210401  # yyyymmdd
+    dates_ = []
+    trainset, testset = [], []
+
+    for it in filt_data:
+        raw = str(dates[it.name]).strip()  # ví dụ '11-FEB-21' hoặc '2019-07-03'
+        # Chuẩn hóa phân tách
+        parts = re.split(r'[-/\s]+', raw)
+
+        try:
+            if len(parts) >= 3 and parts[1].isalpha():
+                # dạng 'DD-MON-YY' hoặc 'DD-MON-YYYY'
+                d = int(parts[0])
+                m = month[parts[1].upper()[:3]]
+                y_str = parts[2]
+                if len(y_str) == 4:
+                    y = int(y_str)
+                else:
+                    y2 = int(y_str)
+                    y = 2000 + y2 if y2 < 23 else 1900 + y2
+            elif len(parts) >= 3 and parts[0].isdigit() and len(parts[0]) == 4:
+                # dạng 'YYYY-MM-DD'
+                y = int(parts[0]); m = int(parts[1]); d = int(parts[2])
+            else:
+                print(f"[WARN] Unrecognized date '{raw}' for {it.name}; skipping")
+                continue
+
+            date = y*10000 + m*100 + d
+        except Exception as e:
+            print(f"[WARN] Bad date '{raw}' for {it.name}: {e}; skipping")
+            continue
+
+        if date < TEST_CUTOFF:
+            dates_.append(date)
             trainset.append(it)
         else:
             testset.append(it)
+
 
     with open(f'{root}/train.pkl','wb') as f:
         pk.dump(trainset, f)
