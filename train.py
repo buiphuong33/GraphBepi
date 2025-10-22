@@ -73,11 +73,30 @@ logger = TensorBoardLogger(
     name=log_name+f'_{args.fold}'
 )
 cb=[mc,es]
-trainer = pl.Trainer(
-    gpus=[args.gpu] if args.gpu!=-1 else None, 
-    max_epochs=args.epochs, callbacks=cb,
-    logger=logger,check_val_every_n_epoch=1,
-)
+# trainer = pl.Trainer(
+#     gpus=[args.gpu] if args.gpu!=-1 else None, 
+#     max_epochs=args.epochs, callbacks=cb,
+#     logger=logger,check_val_every_n_epoch=1,
+# )
+
+if args.gpu == -1 or not torch.cuda.is_available():
+    trainer = pl.Trainer(
+        max_epochs=args.epochs,
+        accelerator="cpu",
+        devices=1,
+        callbacks=cb,
+        logger=logger,
+        check_val_every_n_epoch=1,
+    )
+else:
+    trainer = pl.Trainer(
+        max_epochs=args.epochs,
+        accelerator="gpu",
+        devices=[args.gpu],   # thay cho gpus=[...]
+        callbacks=cb,
+        logger=logger,
+        check_val_every_n_epoch=1,
+    )
 
 if os.path.exists(f'./model/{log_name}/model_{args.fold}.ckpt'):
     os.remove(f'./model/{log_name}/model_{args.fold}.ckpt')
