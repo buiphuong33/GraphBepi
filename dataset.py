@@ -235,7 +235,8 @@ if __name__ == "__main__":
     with open(f'{root}/test.pkl','wb') as f:
         pk.dump(testset, f)
 
-    idx = np.array(DATES_FOR_CV).argsort()
+    #idx = np.array(DATES_FOR_CV).argsort()
+    idx = np.array(dates_).argsort()
     np.save(f'{root}/cross-validation.npy', idx)
     print(f"[INFO] Done. Train: {len(trainset)}, Test: {len(testset)}, CV idx shape: {idx.shape}")
 

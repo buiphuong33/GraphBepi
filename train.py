@@ -104,6 +104,14 @@ trainer.fit(model, train_loader, val_loader)
 model.load_state_dict(
     torch.load(f'./model/{log_name}/model_{args.fold}.ckpt')['state_dict'],
 )
-trainer = pl.Trainer(gpus=[args.gpu],logger=None)
-result = trainer.test(model,test_loader)
+# trainer = pl.Trainer(gpus=[args.gpu],logger=None)
+# result = trainer.test(model,test_loader)
+if args.gpu == -1 or not torch.cuda.is_available():
+    test_trainer = pl.Trainer(accelerator="cpu", devices=1, logger=None)
+else:
+    test_trainer = pl.Trainer(accelerator="gpu", devices=[args.gpu], logger=None)
+
+result = test_trainer.test(model, test_loader)
+
+
 os.rename(f'./model/{log_name}/result.pkl',f'./model/{log_name}/result_{args.fold}.pkl')
