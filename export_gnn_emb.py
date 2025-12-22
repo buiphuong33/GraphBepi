@@ -71,7 +71,7 @@ def export_embeddings(ckpt, root, out_dir='./tabular', split='train', batch=8, g
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--ckpt', type=str, required=True)
-    parser.add_argument('--root', type=str, default='./data/BCE_633')
+    parser.add_argument('--root', type=str, default='/kaggle/input/dataset/data/BCE_633')
     parser.add_argument('--out', type=str, default='./tabular')
     parser.add_argument('--split', type=str, default='train', choices=['train','val','test'])
     parser.add_argument('--batch', type=int, default=8)

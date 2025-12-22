@@ -349,7 +349,7 @@ def export_tabular(root, out_dir="./tabular", split='all'):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--root', type=str, default='./data/BCE_633')
+    parser.add_argument('--root', type=str, default='/kaggle/input/dataset/data/BCE_633')
     parser.add_argument('--out', type=str, default='./tabular')
     parser.add_argument('--split', type=str, default='all', choices=['train','test','all'])
     args = parser.parse_args()

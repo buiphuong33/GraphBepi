@@ -93,7 +93,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--root', type=str, default='./data/BCE_633')
+    parser.add_argument('--root', type=str, default='/kaggle/input/dataset/data/BCE_633')
     parser.add_argument('--out', type=str, default='./tabular')
     parser.add_argument('--split', type=str, default='train', choices=['train','all'])
     parser.add_argument('--out-model', type=str, default='./model/xgb_model.joblib')
