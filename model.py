@@ -74,6 +74,39 @@ class GraphBepi(pl.LightningModule):
         h=[torch.cat([x_attn,x_gcn],-1) for x_attn,x_gcn in zip(x_attns,x_gcns)]
         h=torch.cat(h,0)
         return self.mlp(h)
+
+    def embed(self, V, edge):
+        """Return per-residue embeddings from the model (before final MLP).
+        Input:
+            V: list of tensors (L_i x D)
+            edge: list of tensors (L_i x L_i x edge_dim)
+        Output:
+            List of tensors [ (L_i x H) ] where H = concat(LSTM_out_dim + GCN_out_dim)
+        """
+        was_train = self.training
+        self.eval()
+        with torch.no_grad():
+            V = pad_sequence(V, batch_first=True, padding_value=0).float()
+            mask=V.sum(-1)!=0
+            mask_lens=mask.sum(1)
+            feats,exfeats=self.W_v(V[:,:,:-self.exfeat_dim]),self.W_u1(V[:,:,-self.exfeat_dim:])
+            x_gcns=[]
+            for i in range(len(V)):
+                E=self.edge_linear(edge[i]).permute(2,0,1)
+                x1,x2=feats[i,:mask_lens[i]],exfeats[i,:mask_lens[i]]
+                x_gcn=torch.cat([x1,x2],-1)
+                x_gcn,_=self.gat(x_gcn,E)
+                x_gcns.append(x_gcn)
+            feats_pack=pack_padded_sequence(feats,mask_lens.cpu(),True,False)
+            exfeats_pack=pack_padded_sequence(exfeats,mask_lens.cpu(),True,False)
+            feats_lstm=pad_packed_sequence(self.lstm1(feats_pack)[0],True)[0]
+            exfeats_lstm=pad_packed_sequence(self.lstm2(exfeats_pack)[0],True)[0]
+            x_attns=torch.cat([feats_lstm,exfeats_lstm],-1)
+            x_attns=[x_attns[i,:mask_lens[i]] for i in range(len(x_attns))]
+            h_list=[torch.cat([x_attn,x_gcn],-1) for x_attn,x_gcn in zip(x_attns,x_gcns)]
+        if was_train:
+            self.train()
+        return h_list
     def training_step(self, batch, batch_idx): 
         feat, edge, y = batch
         pred = self(feat, edge).squeeze(-1)

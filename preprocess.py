@@ -6,7 +6,7 @@ DICT={
     'MET': 'M', 'MSE': 'M', 'ASN': 'N', 'PRO': 'P', 'GLN': 'Q', 'ARG': 'R',
     'SER': 'S', 'THR': 'T', 'VAL': 'V', 'TRP': 'W', 'TYR': 'Y',
 }
-def pdb_split(line):
+def pdb_split(line): #cắt 1 dòng pdb thành các trường
     order=int(line[6:11].strip())
     atom=line[11:16].strip()
     amino=line[16:21].strip()
@@ -17,11 +17,11 @@ def pdb_split(line):
     z=line[46:54].strip()
     return order,atom,amino,chain,site,x,y,z
 def judge(line,filt_atom='CA'):
-    kind=line[:6].strip()
+    kind=line[:6].strip() #đọc 6 kí tự đầu để xem nó thuộc loại gì
     if kind not in ['HETATM','ATOM']:
         return None
     order,atom,amino,chain,site,x,y,z=pdb_split(line)
-    if filt_atom is not None and atom!=filt_atom:
+    if filt_atom is not None and atom!=filt_atom: #chỉ giữ cacbon alpha cho mỗi residue
         return None
     prefix=''
     if len(amino)>3:
@@ -35,10 +35,10 @@ def judge(line,filt_atom='CA'):
         return None
     return prefix+amino,chain,site,float(x),float(y),float(z)
 def process_dssp(dssp_file):
-    aa_type = "ACDEFGHIKLMNPQRSTVWY"
-    SS_type = "HBEGITSC"
+    aa_type = "ACDEFGHIKLMNPQRSTVWY" #thứ tự 20 loại amino acid chuẩn
+    SS_type = "HBEGITSC" #8 loại secondary structure theo DSSP
     rASA_std = [115, 135, 150, 190, 210, 75, 195, 175, 200, 170,
-                185, 160, 145, 180, 225, 115, 140, 155, 255, 230]
+                185, 160, 145, 180, 225, 115, 140, 155, 255, 230] #giá trị dtich bề mặt tối đa cho mỗi aa
     with open(dssp_file, "r") as f:
         lines = f.readlines()
     seq = ""

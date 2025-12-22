@@ -70,6 +70,8 @@ def download_pdb_with_fallback(pdb_id_4, out_pdb_path):
 #     'H': 20, 'W': 21, 'C': 22, 'X': 23,
 #     'B': 24, 'O': 25, 'U': 26, 'Z': 27
 # }
+
+#vocabulary của esm-2
 amino2id={
     '<null_0>': 0, '<pad>': 1, '<eos>': 2, '<unk>': 3,
     'L': 4, 'A': 5, 'G': 6, 'V': 7, 'S': 8, 'E': 9, 'R': 10, 
@@ -80,9 +82,9 @@ amino2id={
 }
 class chain:
     def __init__(self):
-        self.sequence=[]
-        self.amino=[]
-        self.coord=[]
+        self.sequence=[] #list kí tự aa
+        self.amino=[] #list id (theo amino2id)
+        self.coord=[] #list tọa độ cacbon alpha cho mỗi residue
         self.site={}
         self.date=''
         self.length=0
@@ -93,7 +95,7 @@ class chain:
         self.name=''
         self.chain_name=''
         self.protein_name=''
-    def add(self,amino,pos,coord):
+    def add(self,amino,pos,coord): #thêm 1 residue vào chain
         self.sequence.append(DICT[amino])
         self.amino.append(amino2id[DICT[amino]])
         self.coord.append(coord)
@@ -261,3 +263,94 @@ def initial(file,root,model=None,device='cpu',from_native_pdb=True):
             samples.append(data)
     with open(f'{root}/total.pkl','wb') as f:
         pk.dump(samples,f)
+
+
+def export_tabular(root, out_dir="./tabular", split='all'):
+    """Export per-residue tabular features for XGBoost.
+    Produces: <out_dir>/<split>.npz with arrays: X (N x D), y (N,), names (N,), idx (N,), resn (N,)
+    split: 'train' or 'test' or 'all' (default 'all' -> concatenate train+test)
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    pk_map = {
+        'train': f'{root}/train.pkl',
+        'test': f'{root}/test.pkl',
+        'all': None,
+    }
+    samples = []
+    if split in ('train','test'):
+        p = pk_map[split]
+        if not os.path.exists(p):
+            raise FileNotFoundError(f"{p} not found. Run initial() first to build pickles")
+        with open(p,'rb') as f:
+            samples = pk.load(f)
+    else:
+        # concat train + test if available
+        files = [f'{root}/train.pkl', f'{root}/test.pkl']
+        for p in files:
+            if os.path.exists(p):
+                with open(p,'rb') as f:
+                    samples += pk.load(f)
+        if len(samples)==0:
+            # fallback to total.pkl
+            with open(f'{root}/total.pkl','rb') as f:
+                samples = pk.load(f)
+
+    rows_X = []
+    rows_y = []
+    rows_name = []
+    rows_idx = []
+    rows_resn = []
+
+    for s in tqdm(samples, desc='Exporting residues'):
+        # ensure features loaded
+        try:
+            s.load_feat(root)
+            s.load_dssp(root)
+            s.load_adj(root,self_cycle=False)
+        except Exception as e:
+            print(f"[WARN] Failed to load features for {s.name}: {e}")
+            continue
+        L = len(s)
+        feat = s.feat.numpy() if isinstance(s.feat, torch.Tensor) else np.array(s.feat)
+        dssp = s.dssp.numpy() if isinstance(s.dssp, torch.Tensor) else np.array(s.dssp)
+        adj = s.adj.numpy() if isinstance(s.adj, torch.Tensor) else np.array(s.adj)
+        edge = s.edge.numpy() if isinstance(s.edge, torch.Tensor) else np.array(s.edge)
+        amino_ids = s.amino.numpy() if isinstance(s.amino, torch.Tensor) else np.array(s.amino)
+
+        for i in range(L):
+            esm_i = feat[i]
+            dssp_i = dssp[i]
+            deg = float(adj[i].sum())
+            # neighbor mean edge features
+            neighbors = adj[i] > 0
+            if neighbors.any():
+                neigh_edge_mean = edge[i, neighbors].mean(axis=0)
+            else:
+                neigh_edge_mean = np.zeros(edge.shape[2], dtype=np.float32)
+            amino_id = float(amino_ids[i])
+            x = np.concatenate([esm_i.astype(np.float32), dssp_i.astype(np.float32), np.array([deg], dtype=np.float32), neigh_edge_mean.astype(np.float32), np.array([amino_id], dtype=np.float32)])
+            rows_X.append(x)
+            rows_y.append(float(s.label[i].item() if isinstance(s.label, torch.Tensor) else s.label[i]))
+            rows_name.append(s.name)
+            rows_idx.append(i)
+            rows_resn.append(s.sequence[i])
+
+    X = np.vstack(rows_X).astype(np.float32)
+    y = np.array(rows_y, dtype=np.uint8)
+    names = np.array(rows_name, dtype=object)
+    idxs = np.array(rows_idx, dtype=np.int32)
+    resn = np.array(rows_resn, dtype=object)
+    out_path = os.path.join(out_dir, f'{split}.npz')
+    np.savez_compressed(out_path, X=X, y=y, names=names, idxs=idxs, resn=resn)
+    print(f"[DONE] Exported {X.shape[0]} residues to {out_path}")
+    return out_path
+
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--root', type=str, default='./data/BCE_633')
+    parser.add_argument('--out', type=str, default='./tabular')
+    parser.add_argument('--split', type=str, default='all', choices=['train','test','all'])
+    args = parser.parse_args()
+    export_tabular(args.root, args.out, args.split)
