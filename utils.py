@@ -113,19 +113,58 @@ class chain:
         with torch.no_grad():
             feat=f(self.amino)
         torch.save(feat,f'{path}/feat/{self.name}_esm2.ts')
-    def load_dssp(self,path):
-        dssp=torch.Tensor(np.load(f'{path}/dssp/{self.name}.npy'))
-        pos=np.load(f'{path}/dssp/{self.name}_pos.npy')
-        self.dssp=torch.Tensor([
+    def load_dssp(self, path):
+        dssp = torch.Tensor(np.load(f'{path}/dssp/{self.name}.npy'))
+        pos  = np.load(f'{path}/dssp/{self.name}_pos.npy')
+
+        self.dssp = torch.Tensor([
             -2.4492936e-16, -2.4492936e-16,
             1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0
-        ]).repeat(self.length,1)
-        self.rsa=torch.zeros(self.length)
+        ]).repeat(self.length, 1)
+        self.rsa = torch.zeros(self.length)
+
+        missed = 0
         for i in range(len(dssp)):
-            self.dssp[self.site[pos[i]]]=dssp[i]
-            if dssp[i][4]>0.15:
-                self.rsa[i]=1
-        self.rsa=self.rsa.bool()
+            k = pos[i]
+
+            # normalize key variants
+            ks = str(k).strip()          # '260'
+            k0 = ks                       # primary string key
+            k_int = None
+            try:
+                k_int = int(ks)           # 260 (if pure number)
+            except:
+                pass
+
+            idx = None
+            # try direct matches first
+            if k in self.site:
+                idx = self.site[k]
+            elif k0 in self.site:
+                idx = self.site[k0]
+            elif k_int is not None and k_int in self.site:
+                idx = self.site[k_int]
+            else:
+                # last-resort: handle insertion codes like '260A' by prefix match
+                # (same idea as your update() method)
+                for key in self.site.keys():
+                    if str(key).startswith(k0):
+                        idx = self.site.get(key)
+                        break
+
+            if idx is None:
+                missed += 1
+                continue
+
+            self.dssp[idx] = dssp[i]
+            # rsa threshold should be written at residue index, not loop index i
+            if dssp[i][4] > 0.15:
+                self.rsa[idx] = 1
+
+        self.rsa = self.rsa.bool()
+        if missed > 0:
+            print(f"[WARN] DSSP mapping missed {missed} residues for {self.name}")
+
     def load_feat(self,path):
         self.feat=torch.load(f'{path}/feat/{self.name}_esm2.ts')
     def load_adj(self,path,self_cycle=False):
