@@ -62,7 +62,7 @@ def main(args):
         objective='binary:logistic',
         eval_metric='aucpr',
         use_label_encoder=False,
-        n_estimators=20,
+        n_estimators=1000,
         learning_rate=0.05,
         max_depth=6,
         subsample=0.8,
