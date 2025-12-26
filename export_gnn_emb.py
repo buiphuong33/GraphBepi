@@ -39,21 +39,52 @@ def export_embeddings(ckpt, root, out_dir='./tabular', split='train', batch=8, g
         batch_samples = dataset.data[start:end]
         V_list = []
         E_list = []
+        valid_samples = []
+
         for s in batch_samples:
-            s.load_feat(root)
-            s.load_dssp(root)
-            s.load_adj(root)
+            try:
+                s.load_feat(root)
+                s.load_dssp(root)
+                s.load_adj(root)
+            except Exception as e:
+                print(f"[WARN] Skip {s.name} due to feature/graph error: {repr(e)}")
+                continue
+
+            # sanity check lengths
+            if s.feat is None or s.dssp is None:
+                print(f"[WARN] Skip {s.name}: missing feat/dssp")
+                continue
+
+            if s.feat.shape[0] != s.dssp.shape[0]:
+                print(f"[WARN] Skip {s.name}: feat len {s.feat.shape[0]} != dssp len {s.dssp.shape[0]}")
+                continue
+
+            # also ensure sequence length is usable for residue loop
+            L = s.feat.shape[0]
+            if len(s.sequence) < L:
+                print(f"[WARN] Skip {s.name}: sequence len {len(s.sequence)} < feat len {L}")
+                continue
+
             V_list.append(torch.cat([s.feat, s.dssp], 1))
             E_list.append(s.edge)
+            valid_samples.append(s)
+
+        # nếu batch này không còn sample hợp lệ thì skip batch
+        if len(valid_samples) == 0:
+            continue
+
         # move tensors to device
         V_list = [v.to(device) for v in V_list]
         E_list = [e.to(device) for e in E_list]
+
         with torch.no_grad():
             if gnn_only:
                 h_list = model.embed_gnn_only(V_list, E_list)
             else:
                 h_list = model.embed(V_list, E_list)
-        for s, h in zip(batch_samples, h_list):
+
+        # zip theo valid_samples (không phải batch_samples nữa)
+        for s, h in zip(valid_samples, h_list):
             h_cpu = h.cpu().numpy()
             L = h_cpu.shape[0]
             for i in range(L):
@@ -66,8 +97,7 @@ def export_embeddings(ckpt, root, out_dir='./tabular', split='train', batch=8, g
                     break
             if limit is not None and count >= limit:
                 break
-        if limit is not None and count >= limit:
-            break
+
     emb_arr = np.vstack(emb_out).astype(np.float32)
     names_arr = np.array(names_out, dtype=object)
     idxs_arr = np.array(idxs_out, dtype=np.int32)
