@@ -107,6 +107,30 @@ class GraphBepi(pl.LightningModule):
         if was_train:
             self.train()
         return h_list
+
+    def embed_gnn_only(self, V, edge):
+        """Return per-residue embeddings produced by GNN only (W_v/W_u1 + EGAT), skipping LSTM.
+        Input/Output like embed(): returns a list of tensors [(L_i x H), ...]
+        """
+        was_train = self.training
+        self.eval()
+        with torch.no_grad():
+            V = pad_sequence(V, batch_first=True, padding_value=0).float()
+            mask = V.sum(-1) != 0
+            mask_lens = mask.sum(1)
+            feats = self.W_v(V[:,:,:-self.exfeat_dim])
+            exfeats = self.W_u1(V[:,:,-self.exfeat_dim:])
+            gcn_outs = []
+            for i in range(len(V)):
+                E = self.edge_linear(edge[i]).permute(2,0,1)
+                x1 = feats[i,:mask_lens[i]]
+                x2 = exfeats[i,:mask_lens[i]]
+                x = torch.cat([x1, x2], -1)
+                x_gcn, _ = self.gat(x, E)
+                gcn_outs.append(x_gcn)
+        if was_train:
+            self.train()
+        return gcn_outs
     def training_step(self, batch, batch_idx): 
         feat, edge, y = batch
         pred = self(feat, edge).squeeze(-1)

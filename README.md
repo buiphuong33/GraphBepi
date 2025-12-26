@@ -77,6 +77,12 @@ python train_xgb.py --root ./data/BCE_633 --out ./tabular --split train --out-mo
 python train_xgb.py --root ./data/BCE_633 --out ./tabular --split train --out-model ./model/xgb_gnn.joblib --use-gnn --pca-dim 10
 ```
 
+- To export GNN-only embeddings (skip the BiLSTM stage in `embed()`), use the `--gnn-only` flag:
+
+```
+python export_gnn_emb.py --ckpt ./model/BCE_633_GraphBepi/model_-1.ckpt --root ./data/BCE_633 --out ./tabular --split train --gpu 0 --gnn-only
+```
+
 - Predict on test and output per-protein CSVs:
 
 ```

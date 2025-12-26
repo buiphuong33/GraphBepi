@@ -9,14 +9,21 @@ def merge(tabular_dir='./tabular', split='train', pca_dim=10, out_dir=None, pca_
     if out_dir is None:
         out_dir = tabular_dir
     tab_path = os.path.join(tabular_dir, f'{split}.npz')
-    gnn_path = os.path.join(tabular_dir, f'gnn_{split}.npz')
+    # prefer gnn-only variant if present
+    gnn_candidates = [os.path.join(tabular_dir, f'gnn_{split}_gnnonly.npz'), os.path.join(tabular_dir, f'gnn_{split}.npz')]
+    gnn_path = None
+    for candidate in gnn_candidates:
+        if os.path.exists(candidate):
+            gnn_path = candidate
+            break
     if not os.path.exists(tab_path):
         raise FileNotFoundError(f"Tabular file {tab_path} not found. Run export_tabular first.")
-    if not os.path.exists(gnn_path):
-        raise FileNotFoundError(f"GNN embeddings {gnn_path} not found. Run export_gnn_emb first.")
+    if gnn_path is None:
+        raise FileNotFoundError(f"GNN embeddings not found. Run export_gnn_emb first (looked for: {gnn_candidates})")
 
     tab = np.load(tab_path, allow_pickle=True)
     gnn = np.load(gnn_path, allow_pickle=True)
+    print(f"[INFO] Merging using GNN file: {gnn_path}")
 
     X = tab['X']
     y = tab['y'] if 'y' in tab else None
