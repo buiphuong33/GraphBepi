@@ -7,6 +7,7 @@ import joblib
 from sklearn.model_selection import train_test_split
 import xgboost as xgb
 import torch
+from xgboost.callback import EarlyStopping
 
 
 def load_or_export(root, out_dir, split, use_gnn=False, pca_dim=0):
@@ -73,8 +74,12 @@ def main(args):
 
     eval_set = [(X_tr, y_tr), (X_val, y_val)]
     print('[INFO] Training XGBoost...')
-    clf.fit(X_tr, y_tr, eval_set=eval_set, early_stopping_rounds=50, verbose=10)
-
+    clf.fit(
+        X_tr, y_tr,
+        eval_set=eval_set,
+        callbacks=[EarlyStopping(rounds=50, save_best=True)],
+        verbose=10
+    )
     model_path = os.path.join(args.out_model)
     joblib.dump(clf, model_path)
     print(f'[DONE] Saved model to {model_path}')
