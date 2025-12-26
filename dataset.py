@@ -42,7 +42,11 @@ class PDB(Dataset):
             tbar.set_postfix(chain=f'{self.samples[i].name}')
             self.samples[i].load_feat(self.root)
             self.samples[i].load_dssp(self.root)
-            self.samples[i].load_adj(self.root,self_cycle)
+            try:
+                self.samples[i].load_adj(self.root, self_cycle)
+            except Exception as e:
+                print(f"[WARN] Skip {self.samples[i].name} due to graph error: {repr(e)}")
+                continue
             self.data.append(self.samples[i])
     def __len__(self):
         return len(self.data)
