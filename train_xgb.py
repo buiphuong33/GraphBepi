@@ -88,8 +88,7 @@ def main(args):
 
             # ---- GPU settings ----
             tree_method='gpu_hist',
-            predictor='gpu_predictor',
-            gpu_id=0,
+            device='cuda',
 
             random_state=seed,
             verbosity=1,
