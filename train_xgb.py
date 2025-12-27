@@ -57,6 +57,10 @@ def main(args):
 
     # further split X_train->train/val for early stopping
     X_tr, X_val, y_tr, y_val = train_test_split(X_train, y_train, test_size=0.1, stratify=y_train, random_state=42)
+    pos = (y_tr == 1).sum()
+    neg = (y_tr == 0).sum()
+    spw = float(neg) / float(pos + 1e-9)
+    print(f"[INFO] pos={pos} neg={neg} scale_pos_weight={spw:.2f}")
 
     clf = xgb.XGBClassifier(
         objective='binary:logistic',
@@ -67,12 +71,13 @@ def main(args):
         max_depth=6,
         subsample=0.8,
         colsample_bytree=0.8,
+        scale_pos_weight=spw,
         random_state=42,
         verbosity=1,
         n_jobs=max(1, os.cpu_count()-1)
     )
 
-    eval_set = [(X_tr, y_tr), (X_val, y_val)]
+    eval_set = [(X_val, y_val)]
     print('[INFO] Training XGBoost...')
     clf.fit(
         X_tr, y_tr,
