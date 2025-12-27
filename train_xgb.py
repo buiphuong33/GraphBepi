@@ -60,7 +60,7 @@ def main(args):
 
     clf = xgb.XGBClassifier(
         objective='binary:logistic',
-        eval_metric='aucpr',
+        eval_metric=['auc', 'aucpr'],
         use_label_encoder=False,
         n_estimators=1000,
         learning_rate=0.05,
@@ -90,6 +90,9 @@ def main(args):
     y_t = torch.tensor(y_test)
     res = metrics.calc_prc(pred_t, y_t)
     print('[RESULT] AUROC/AUPRC:', res['AUROC'], res['AUPRC'])
+    # compute thresholded metrics (auto-select threshold by maximizing F1)
+    thr_metrics = metrics(pred_t, y_t)
+    print(f"[RESULT] F1: {thr_metrics['F1']:.4f}, MCC: {thr_metrics['MCC']:.4f}, Threshold: {thr_metrics['threshold']:.4f}")
 
     # save predictions
     np.savez_compressed(os.path.join(args.out, 'xgb_test_preds.npz'), proba=proba, y=y_test)
