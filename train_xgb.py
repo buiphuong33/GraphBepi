@@ -87,8 +87,7 @@ def main(args):
             scale_pos_weight=spw,
 
             # ---- GPU settings ----
-            tree_method='gpu_hist',
-            device='cuda',
+            tree_method='hist',
 
             random_state=seed,
             verbosity=1,
