@@ -62,34 +62,55 @@ def main(args):
     spw = float(neg) / float(pos + 1e-9)
     print(f"[INFO] pos={pos} neg={neg} scale_pos_weight={spw:.2f}")
 
-    clf = xgb.XGBClassifier(
-        objective='binary:logistic',
-        eval_metric=['auc', 'aucpr'],
-        use_label_encoder=False,
-        n_estimators=1000,
-        learning_rate=0.05,
-        max_depth=6,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        scale_pos_weight=spw,
-        random_state=42,
-        verbosity=1,
-        n_jobs=max(1, os.cpu_count()-1)
-    )
+    seeds = [int(s.strip()) for s in args.seeds.split(',') if s.strip()]
+    if len(seeds) != 3:
+        print(f"[WARN] You requested 3 models; seeds provided = {len(seeds)}. Using: {seeds}")
 
     eval_set = [(X_val, y_val)]
-    print('[INFO] Training XGBoost...')
-    clf.fit(
-        X_tr, y_tr,
-        eval_set=eval_set,
-        verbose=10
-    )
-    model_path = os.path.join(args.out_model)
-    joblib.dump(clf, model_path)
-    print(f'[DONE] Saved model to {model_path}')
+    print('[INFO] Training XGBoost ensemble on GPU...')
 
-    # Evaluate on test
-    proba = clf.predict_proba(X_test)[:,1]
+    probas = []
+
+    for k, seed in enumerate(seeds, 1):
+        print(f"\n[INFO] Model {k}/{len(seeds)} seed={seed}")
+
+        clf = xgb.XGBClassifier(
+            objective='binary:logistic',
+            eval_metric=['auc', 'aucpr'],
+            use_label_encoder=False,
+
+            n_estimators=1000,
+            learning_rate=0.05,
+            max_depth=6,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            scale_pos_weight=spw,
+
+            # ---- GPU settings ----
+            tree_method='gpu_hist',
+            predictor='gpu_predictor',
+            gpu_id=0,
+
+            random_state=seed,
+            verbosity=1,
+            n_jobs=max(1, os.cpu_count()-1)
+        )
+
+        clf.fit(X_tr, y_tr, eval_set=eval_set, verbose=10)
+
+        # save each model
+        base, ext = os.path.splitext(args.out_model)
+        model_path = f"{base}_seed{seed}{ext}"
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        joblib.dump(clf, model_path)
+        print(f'[DONE] Saved model to {model_path}')
+
+        probas.append(clf.predict_proba(X_test)[:, 1])
+
+    # Ensemble: average probabilities
+    proba = np.mean(np.vstack(probas), axis=0)
+    print(f"\n[INFO] Ensemble done: averaged {len(probas)} models")
+
     metrics = METRICS(device='cpu')
     pred_t = torch.tensor(proba)
     y_t = torch.tensor(y_test)
@@ -111,5 +132,7 @@ if __name__ == '__main__':
     parser.add_argument('--out-model', type=str, default='./model/xgb_model.joblib')
     parser.add_argument('--use-gnn', action='store_true', help='Use GNN embeddings merged into features')
     parser.add_argument('--pca-dim', type=int, default=10, help='PCA dim for GNN embeddings (fit on train)')
+    parser.add_argument('--seeds', type=str, default='42,202,777',
+                    help='Comma-separated random seeds for ensemble (e.g., 42,202,777)')
     args = parser.parse_args()
     main(args)
