@@ -69,43 +69,70 @@ def main(args):
     eval_set = [(X_val, y_val)]
     print('[INFO] Training XGBoost ensemble on GPU...')
 
+    param_grid = [
+        dict(
+            max_depth=4, learning_rate=0.05,
+            subsample=0.85, colsample_bytree=0.65,
+            min_child_weight=10,
+            reg_lambda=5.0, reg_alpha=1.0,
+            gamma=2.0
+        ),
+        dict(
+            max_depth=6, learning_rate=0.03,
+            subsample=0.80, colsample_bytree=0.80,
+            min_child_weight=3,
+            reg_lambda=2.0, reg_alpha=0.0,
+            gamma=0.0
+        ),
+        dict(
+            max_depth=7, learning_rate=0.05,
+            subsample=0.70, colsample_bytree=0.90,
+            min_child_weight=1,
+            reg_lambda=1.0, reg_alpha=0.0,
+            gamma=0.0
+        ),
+    ]
     probas = []
+    n_models = min(len(seeds), len(param_grid))
 
-    for k, seed in enumerate(seeds, 1):
-        print(f"\n[INFO] Model {k}/{len(seeds)} seed={seed}")
+    for i in range(n_models):
+        seed = seeds[i]
+        hp = param_grid[i]
+        print(f"\n[INFO] Model {i+1}/{n_models} seed={seed} hp={hp}")
 
         clf = xgb.XGBClassifier(
             objective='binary:logistic',
-            eval_metric=['auc', 'aucpr'],
-            use_label_encoder=False,
-
-            n_estimators=1000,
-            learning_rate=0.05,
-            max_depth=6,
-            subsample=0.8,
-            colsample_bytree=0.8,
+            eval_metric=['aucpr'],   
+            n_estimators=3000,      
+            learning_rate=hp["learning_rate"],
+            max_depth=hp["max_depth"],
+            subsample=hp["subsample"],
+            colsample_bytree=hp["colsample_bytree"],
+            min_child_weight=hp["min_child_weight"],
+            reg_lambda=hp["reg_lambda"],
+            reg_alpha=hp["reg_alpha"],
+            gamma=hp["gamma"],
             scale_pos_weight=spw,
 
-            # ---- GPU settings ----
-            tree_method='hist',
-
+            tree_method='hist',      
             random_state=seed,
             verbosity=1,
             n_jobs=max(1, os.cpu_count()-1)
         )
 
-        clf.fit(X_tr, y_tr, eval_set=eval_set, verbose=10)
+        clf.fit(X_tr, y_tr, eval_set=eval_set, verbose=50)
 
-        # save each model
         base, ext = os.path.splitext(args.out_model)
-        model_path = f"{base}_seed{seed}{ext}"
-        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        model_path = f"{base}_m{i+1}_seed{seed}{ext}"
+        dirn = os.path.dirname(model_path)
+        if dirn:
+            os.makedirs(dirn, exist_ok=True)
         joblib.dump(clf, model_path)
-        print(f'[DONE] Saved model to {model_path}')
+        print(f"[DONE] Saved model to {model_path}")
 
         probas.append(clf.predict_proba(X_test)[:, 1])
 
-    # Ensemble: average probabilities
+    # mean ensemble
     proba = np.mean(np.vstack(probas), axis=0)
     print(f"\n[INFO] Ensemble done: averaged {len(probas)} models")
 
