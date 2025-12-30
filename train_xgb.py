@@ -102,7 +102,7 @@ def main(args):
 
         clf = xgb.XGBClassifier(
             objective='binary:logistic',
-            eval_metric=['aucpr'],   
+            eval_metric=['auc','aucpr'],   
             n_estimators=3000,      
             learning_rate=hp["learning_rate"],
             max_depth=hp["max_depth"],
