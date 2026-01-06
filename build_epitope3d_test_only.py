@@ -9,6 +9,7 @@ from tqdm import tqdm
 
 import torch
 import esm
+import traceback
 
 from utils import chain, extract_chain, process_chain
 
@@ -93,7 +94,8 @@ def main(args):
         try:
             process_chain(obj, root, obj.name, esm_model, device)
         except Exception as e:
-            print(f"[WARN] process_chain failed for {obj.name}: {e}")
+            print(f"[WARN] process_chain failed for {obj.name}: {repr(e)}")
+            traceback.print_exc()
             continue
 
         # label theo idx+1 (giống BCE_633)
