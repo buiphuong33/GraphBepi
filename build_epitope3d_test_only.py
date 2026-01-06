@@ -1,40 +1,39 @@
 import os
-import re
 import pickle as pk
+import traceback
 from collections import defaultdict
 
-import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
 import torch
 import esm
-import traceback
 
 from utils import chain, extract_chain, process_chain
 
 
 def parse_epi_list(epi_str):
-    """
-    "148_GLN_A, 122_PHE_A" → dict { 'A': set([148, 122]) }
-    """
-    out = defaultdict(set)
+    out = defaultdict(list)
     items = [x.strip() for x in str(epi_str).split(",") if x.strip()]
     for it in items:
-        # <resi>_<resn>_<chain>
         parts = it.split("_")
         if len(parts) != 3:
             continue
-        resi_s, _, ch = parts
-        m = re.match(r"(\d+)", resi_s)
-        if not m:
+        site, resn, ch = parts
+        site = site.strip()
+        resn = resn.strip()
+        ch = ch.strip()
+        if not site or not resn or not ch:
             continue
-        out[ch].add(int(m.group(1)))
+        out[ch].append((site, resn))
     return out
 
 
 def choose_device(gpu):
     if gpu == -1 or not torch.cuda.is_available():
+        return "cpu"
+    n = torch.cuda.device_count()
+    if gpu < 0 or gpu >= n:
         return "cpu"
     return f"cuda:{gpu}"
 
@@ -44,8 +43,18 @@ def ensure_folders(root):
         os.makedirs(os.path.join(root, d), exist_ok=True)
 
 
+def load_esm(esm_size, device):
+    if esm_size == "3B":
+        model, _ = esm.pretrained.esm2_t36_3B_UR50D()
+    elif esm_size == "150M":
+        model, _ = esm.pretrained.esm2_t30_150M_UR50D()
+    else:
+        model, _ = esm.pretrained.esm2_t33_650M_UR50D()
+    model = model.to(device).eval()
+    return model
+
+
 def main(args):
-    # cache ESM
     if args.cache:
         os.environ["TORCH_HOME"] = args.cache
         os.makedirs(args.cache, exist_ok=True)
@@ -56,76 +65,71 @@ def main(args):
     device = choose_device(args.gpu)
     print(f"[INFO] Device: {device}")
 
-    # load ESM
-    if args.esm_size == "3B":
-        esm_model, _ = esm.pretrained.esm2_t36_3B_UR50D()
-    elif args.esm_size == "150M":
-        esm_model, _ = esm.pretrained.esm2_t30_150M_UR50D()
-    else:
-        esm_model, _ = esm.pretrained.esm2_t33_650M_UR50D()
+    esm_model = load_esm(args.esm_size, device)
 
-    esm_model = esm_model.to(device).eval()
-
-    # read CSV
     df = pd.read_csv(args.csv)
 
-    # collect (pdb, chain) → epitope residues
-    chain_map = defaultdict(set)
+    chain_map = defaultdict(list)
     for _, row in df.iterrows():
         pdb = str(row["PDB ID"]).lower().strip()
         epi_map = parse_epi_list(row["Epitope List (residueid_residuename_chain)"])
-        for ch, resi_set in epi_map.items():
-            chain_map[(pdb, ch)].update(resi_set)
+        for ch, pairs in epi_map.items():
+            chain_map[(pdb, ch)].extend(pairs)
 
     print(f"[INFO] Total test chains: {len(chain_map)}")
 
     test_samples = []
 
-    for (pdb, ch), epi_resi in tqdm(chain_map.items(), desc="Building test set"):
+    for (pdb, ch), epi_pairs in tqdm(chain_map.items(), desc="Building test set"):
+        name = f"{pdb}_{ch}"
+
         try:
-            extract_chain(root, pdb, ch)
-        except Exception as e:
-            print(f"[WARN] extract_chain failed for {pdb}_{ch}: {e}")
+            ok = extract_chain(root, pdb, ch)
+            if not ok:
+                continue
+        except Exception:
             continue
 
         obj = chain()
-        obj.name = f"{pdb}_{ch}"
+        obj.protein_name = pdb
+        obj.chain_name = ch
+        obj.name = name
 
         try:
             process_chain(obj, root, obj.name, esm_model, device)
-        except Exception as e:
-            print(f"[WARN] process_chain failed for {obj.name}: {repr(e)}")
+        except Exception:
             traceback.print_exc()
             continue
 
-        # label theo idx+1 (giống BCE_633)
-        L = len(obj.sequence)
-        y = np.zeros(L, dtype=np.float32)
-        for i in range(L):
-            if (i + 1) in epi_resi:
-                y[i] = 1.0
+        for site, resn in epi_pairs:
+            try:
+                obj.update(str(site), str(resn))
+            except Exception:
+                continue
 
-        obj.label = torch.tensor(y)
-
-        if obj.label.sum() == 0:
-            print(f"[WARN] {obj.name}: no positive residues after mapping")
+        if obj.label.sum().item() == 0:
+            print(f"[WARN] {name}: no positive residues after mapping")
 
         test_samples.append(obj)
 
-    with open(os.path.join(root, "test.pkl"), "wb") as f:
+    out_path = os.path.join(root, "test.pkl")
+    with open(out_path, "wb") as f:
         pk.dump(test_samples, f)
 
-    print(f"[DONE] test.pkl written with {len(test_samples)} chains")
+    print(f"[DONE] test.pkl written: {out_path}")
+    print(f"[INFO] Chains: {len(test_samples)}")
     print(f"[INFO] Dataset root: {root}")
 
 
 if __name__ == "__main__":
     import argparse
+
     ap = argparse.ArgumentParser()
-    ap.add_argument("--csv", required=True, help="Epitope3D CSV path")
-    ap.add_argument("--root", required=True, help="Output dataset root")
+    ap.add_argument("--csv", required=True)
+    ap.add_argument("--root", required=True)
     ap.add_argument("--gpu", type=int, default=0)
     ap.add_argument("--esm_size", default="650M", choices=["150M", "650M", "3B"])
     ap.add_argument("--cache", default="/kaggle/working/graphbepi_cache")
     args = ap.parse_args()
+
     main(args)
