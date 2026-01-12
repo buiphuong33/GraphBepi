@@ -22,7 +22,10 @@ class PDB(Dataset):
             with open(f'{self.root}/test.pkl','rb') as f:
                 self.samples=pk.load(f)
         self.data=[]
-        idx=np.load(f'{self.root}/cross-validation.npy')
+        if os.path.exists(f'{self.root}/cross-validation.npy'):
+            idx = np.load(f'{self.root}/cross-validation.npy')
+        else:
+            idx = None
         cv=10
         inter=len(idx)//cv
         ex=len(idx)%cv
