@@ -57,15 +57,33 @@ class PDB(Dataset):
         order.sort()
         tbar=tqdm(order)
         for i in tbar:
-            tbar.set_postfix(chain=f'{self.samples[i].name}')
-            self.samples[i].load_feat(self.root)
-            self.samples[i].load_dssp(self.root)
+            name = self.samples[i].name
+            tbar.set_postfix(chain=name)
+
+            feat_path = f"{self.root}/feat/{name}_esm2.ts"
+            dssp_path = f"{self.root}/dssp/{name}.npy"
+            graph_path = f"{self.root}/graph/{name}.npz"
+
+            # thiếu feat → skip
+            if not os.path.exists(feat_path):
+                print(f"[SKIP] Missing feat: {name}")
+                continue
+
+            # thiếu dssp → skip
+            if not os.path.exists(dssp_path):
+                print(f"[SKIP] Missing dssp: {name}")
+                continue
+
             try:
+                self.samples[i].load_feat(self.root)
+                self.samples[i].load_dssp(self.root)
                 self.samples[i].load_adj(self.root, self_cycle)
             except Exception as e:
-                print(f"[WARN] Skip {self.samples[i].name} due to graph error: {repr(e)}")
+                print(f"[SKIP] {name} load failed: {repr(e)}")
                 continue
+
             self.data.append(self.samples[i])
+
     def __len__(self):
         return len(self.data)
     def __getitem__(self,idx):
