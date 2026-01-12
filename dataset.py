@@ -21,14 +21,29 @@ class PDB(Dataset):
         else:
             with open(f'{self.root}/test.pkl','rb') as f:
                 self.samples=pk.load(f)
-        self.data=[]
-        if os.path.exists(f'{self.root}/cross-validation.npy'):
-            idx = np.load(f'{self.root}/cross-validation.npy')
+        self.data = []
+
+        # =======================
+        # CASE 1: TEST MODE (external test, no CV)
+        # =======================
+        if mode == 'test' and not os.path.exists(f'{self.root}/cross-validation.npy'):
+            order = list(range(len(self.samples)))
+
+        # =======================
+        # CASE 2: TRAIN / VAL with CV
+        # =======================
         else:
-            idx = None
-        cv=10
-        inter=len(idx)//cv
-        ex=len(idx)%cv
+            if not os.path.exists(f'{self.root}/cross-validation.npy'):
+                raise FileNotFoundError(
+                    f"[ERROR] cross-validation.npy not found in {self.root} "
+                    f"but mode='{mode}' requires it."
+                )
+
+            idx = np.load(f'{self.root}/cross-validation.npy')
+            cv = 10
+            inter = len(idx) // cv
+            ex = len(idx) % cv
+
         if mode=='train':
             order=[]
             for i in range(cv):
