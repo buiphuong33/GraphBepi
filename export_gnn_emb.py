@@ -55,9 +55,19 @@ def export_embeddings(ckpt, root, out_dir='./tabular', split='train', batch=8, g
                 print(f"[WARN] Skip {s.name}: missing feat/dssp")
                 continue
 
-            if s.feat.shape[0] != s.dssp.shape[0]:
-                print(f"[WARN] Skip {s.name}: feat len {s.feat.shape[0]} != dssp len {s.dssp.shape[0]}")
-                continue
+            # Lấy chiều dài của cả 2
+            feat_len = s.feat.shape[0]
+            dssp_len = s.dssp.shape[0]
+
+            if feat_len != dssp_len:
+                # Nếu feat dài hơn dssp đúng 2 đơn vị -> Khả năng cao là dư token <cls> và <eos>
+                if feat_len == dssp_len + 2:
+                    print(f"[FIXED] {s.name}: Cắt 2 token dư (feat {feat_len} -> {dssp_len}) để khớp với dssp.")
+                    s.feat = s.feat[1:-1] # Cắt index đầu và cuối
+                else:
+                    # Nếu lệch một con số khác (ví dụ 102 vs 90), thì bó tay, bắt buộc phải skip
+                    print(f"[WARN] Skip {s.name}: Lệch quá nhiều! feat len {feat_len} != dssp len {dssp_len}")
+                    continue
 
             # also ensure sequence length is usable for residue loop
             L = s.feat.shape[0]
