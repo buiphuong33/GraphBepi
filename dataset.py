@@ -100,7 +100,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', type=str, default='./data', help='dataset path')
     parser.add_argument('--gpu', type=int, default=0, help='gpu index, -1 for cpu')
-    parser.add_argument('--esm_size', type=str, default='650M', choices=['150M','650M','3B'],
+    parser.add_argument('--esm_size', type=str, default='3B', choices=['150M','650M','3B'],
                         help='ESM-2 variant: 150M | 650M | 3B')
     parser.add_argument('--cache', type=str, default='/kaggle/working/graphbepi_cache',
                         help='TORCH_HOME model cache path')

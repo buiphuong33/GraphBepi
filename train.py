@@ -23,6 +23,7 @@ def seed_everything(seed=2022):
     torch.cuda.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
 parser = argparse.ArgumentParser()
+parser.add_argument('--root', type=str, default='BCE_633', help='dataset name.')
 parser.add_argument('--lr', type=float, default=1e-6, help='learning rate.')
 parser.add_argument('--gpu', type=int, default=0, help='gpu.')
 parser.add_argument('--fold', type=int, default=-1, help='dataset fold. set it -1 to use the whole trainset')
@@ -37,8 +38,8 @@ args = parser.parse_args()
 
 device='cpu' if args.gpu==-1 else f'cuda:{args.gpu}'
 seed_everything(args.seed)
-root=f'./data/{args.dataset}'
-
+#root=f'./data/{args.dataset}'
+root = args.root
 trainset=PDB(mode='train',fold=args.fold,root=root)
 valset=PDB(mode='val',fold=args.fold,root=root)
 testset=PDB(mode='test',fold=args.fold,root=root)
