@@ -1,3 +1,4 @@
+# dataset.py
 import os
 import esm
 import torch
@@ -23,15 +24,9 @@ class PDB(Dataset):
                 self.samples=pk.load(f)
         self.data = []
 
-        # =======================
-        # CASE 1: TEST MODE (external test, no CV)
-        # =======================
         if mode == 'test' and not os.path.exists(f'{self.root}/cross-validation.npy'):
             order = list(range(len(self.samples)))
 
-        # =======================
-        # CASE 2: TRAIN / VAL with CV
-        # =======================
         else:
             if not os.path.exists(f'{self.root}/cross-validation.npy'):
                 raise FileNotFoundError(
@@ -95,76 +90,37 @@ class PDB(Dataset):
             'adj':seq.adj,
             'edge':seq.edge,
         }
-        
-#if __name__ == "__main__":
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument('--root', type=str, default='./data/BCE_633', help='dataset path')
-#     parser.add_argument('--gpu', type=int, default=0, help='gpu.')
-#     args = parser.parse_args()
-#     root = args.root
-#     device='cpu' if args.gpu==-1 else f'cuda:{args.gpu}'
-    
-#     os.system(f'cd {root} && mkdir PDB purePDB feat dssp graph')
-#     # model=None
-#     model,_=esm.pretrained.esm2_t36_3B_UR50D()
-#     model=model.to(device)
-#     model.eval()
-#     train='total.csv'
-#     initial(train,root,model,device)
-#     with open(f'{root}/total.pkl','rb') as f:
-#         dataset=pk.load(f)
-#     dates={i.name:i.date for i in dataset}
-# #     with open(f'{root}/date.pkl','rb') as f:
-# #         dates=pk.load(f)
-#     filt_data=[]
-#     for i in dataset:
-#         if len(i)<1024 and i.label.sum()>0:
-#             filt_data.append(i)
-#     month={'JAN':1,'FEB':2,'MAR':3,'APR':4,'MAY':5,'JUN':6,'JUL':7,'AUG':8,'SEP':9,'OCT':10,'NOV':11,'DEC':12}
-#     trainset,valset,testset=[],[],[]
-#     D,M,Y=[],[],[]
-#     test=20210401
-#     dates_=[]
-#     for i in filt_data:
-#         d,m,y=dates[i.name]
-#         d,m,y=int(d),month[m],int(y)
-#         if y<23:
-#             y+=2000
-#         else:
-#             y+=1900
-#         date=y*10000+m*100+d
-#         if date<test:
-#             dates_.append(date)
-#             trainset.append(i)
-#         else:
-#             testset.append(i)
-#     with open(f'{root}/train.pkl','wb') as f:
-#         pk.dump(trainset,f)
-#     with open(f'{root}/test.pkl','wb') as f:
-#         pk.dump(testset,f)
-#     idx=np.array(dates_).argsort()
-#     np.save(f'{root}/cross-validation.npy',idx)
+
+
 if __name__ == "__main__":
     import pickle as pk
     import numpy as np
     from tqdm import tqdm
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--root', type=str, default='./data/BCE_633', help='dataset path')
+    parser.add_argument('--root', type=str, default='./data', help='dataset path')
     parser.add_argument('--gpu', type=int, default=0, help='gpu index, -1 for cpu')
     parser.add_argument('--esm_size', type=str, default='650M', choices=['150M','650M','3B'],
                         help='ESM-2 variant: 150M | 650M | 3B')
     parser.add_argument('--cache', type=str, default='/kaggle/working/graphbepi_cache',
                         help='TORCH_HOME model cache path')
+    
+    # --- THÊM CÁC THAM SỐ CHO DATASET MỚI ---
+    parser.add_argument('--dataset_type', type=str, default='bce633', choices=['bce633', 'epitope3d'],
+                        help='Chọn loại dữ liệu: bce633 (cũ) hoặc epitope3d (mới)')
+    parser.add_argument('--train_csv', type=str, default='epitope3d_dataset_180_train.csv', 
+                        help='Tên file CSV train cho tập epitope3d')
+    parser.add_argument('--test_csv', type=str, default='epitope3d_dataset_20_test.csv', 
+                        help='Tên file CSV test cho tập epitope3d')
     args = parser.parse_args()
 
-    # 1) Cache cho ESM (để lần sau không tải lại)
+    # 1) Cache cho ESM
     if args.cache:
         os.environ['TORCH_HOME'] = args.cache
         os.makedirs(args.cache, exist_ok=True)
         print(f"[INFO] TORCH_HOME = {os.environ['TORCH_HOME']}")
 
-    # 2) Bảo đảm thư mục tồn tại (không dùng 'cd && mkdir')
+    # 2) Bảo đảm thư mục tồn tại
     root = args.root
     for d in [root, f'{root}/PDB', f'{root}/purePDB', f'{root}/feat', f'{root}/dssp', f'{root}/graph']:
         os.makedirs(d, exist_ok=True)
@@ -178,7 +134,7 @@ if __name__ == "__main__":
         device = f'cuda:{args.gpu}' if 0 <= args.gpu < n else 'cpu'
     print(f"[INFO] Device: {device}")
 
-    # 4) Tải ESM-2 (mặc định 650M cho Kaggle)
+    # 4) Tải ESM-2
     try:
         if args.esm_size == '3B':
             print("[INFO] Loading ESM-2 t36_3B_UR50D (large)")
@@ -196,87 +152,203 @@ if __name__ == "__main__":
     model = model.to(device)
     model.eval()
 
-    # 5) Build dataset (đọc 'total.csv' ở thư mục làm việc hiện tại)
-    csv_path = 'total.csv'
-    if not os.path.exists(csv_path):
-        print(f"[WARN] {csv_path} not found. Check your working directory.")
-    try:
-        initial(csv_path, root, model, device)  # hàm trong utils.py
-    except Exception as e:
-        print("[ERROR] initial() failed:", repr(e))
-        raise
+    # =========================================================
+    # 5) XỬ LÝ DỮ LIỆU TÙY THEO DATASET_TYPE
+    # =========================================================
+    if args.dataset_type == 'bce633':
+        print("[INFO] Đang xử lý tập dữ liệu BCE_633 (Cắt theo Date)...")
+        csv_path = 'total.csv'
+        if not os.path.exists(csv_path):
+            print(f"[WARN] {csv_path} không tồn tại trong thư mục chạy code.")
+        
+        initial(csv_path, root, model, device) 
 
-    # 6) Tách train/test theo mốc 2021-04-01
-    with open(f'{root}/total.pkl','rb') as f:
-        dataset = pk.load(f)
-    dates = {i.name: i.date for i in dataset}
+        # Tách train/test theo mốc 2021-04-01
+        with open(f'{root}/total.pkl','rb') as f:
+            dataset = pk.load(f)
+        dates = {i.name: i.date for i in dataset}
 
-    filt_data = [i for i in dataset if len(i) < 1024 and getattr(i, 'label', None) is not None and i.label.sum() > 0]
-    month = {'JAN':1,'FEB':2,'MAR':3,'APR':4,'MAY':5,'JUN':6,'JUL':7,'AUG':8,'SEP':9,'OCT':10,'NOV':11,'DEC':12}
-    trainset, testset, DATES_FOR_CV = [], [], []
-    TEST_CUTOFF = 20210401
+        filt_data = [i for i in dataset if len(i) < 1024 and getattr(i, 'label', None) is not None and i.label.sum() > 0]
+        month = {'JAN':1,'FEB':2,'MAR':3,'APR':4,'MAY':5,'JUN':6,'JUL':7,'AUG':8,'SEP':9,'OCT':10,'NOV':11,'DEC':12}
+        trainset, testset, dates_ = [], [], []
+        TEST_CUTOFF = 20210401
 
-    # for it in filt_data:
-    #     d, m, y = dates[it.name]
-    #     d = int(d)
-    #     m = month[str(m).upper()]
-    #     y = int(y); y = 2000 + y if y < 23 else 1900 + y
-    #     date_int = y*10000 + m*100 + d
-
-    #     if date_int < TEST_CUTOFF:
-    #         DATES_FOR_CV.append(date_int)
-    #         trainset.append(it)
-    #     else:
-    #         testset.append(it)
-
-    
-
-    TEST_CUTOFF = 20210401  # yyyymmdd
-    dates_ = []
-    trainset, testset = [], []
-
-    for it in filt_data:
-        raw = str(dates[it.name]).strip()  # ví dụ '11-FEB-21' hoặc '2019-07-03'
-        # Chuẩn hóa phân tách
-        parts = re.split(r'[-/\s]+', raw)
-
-        try:
-            if len(parts) >= 3 and parts[1].isalpha():
-                # dạng 'DD-MON-YY' hoặc 'DD-MON-YYYY'
-                d = int(parts[0])
-                m = month[parts[1].upper()[:3]]
-                y_str = parts[2]
-                if len(y_str) == 4:
-                    y = int(y_str)
+        for it in filt_data:
+            raw = str(dates[it.name]).strip()
+            parts = re.split(r'[-/\s]+', raw)
+            try:
+                if len(parts) >= 3 and parts[1].isalpha():
+                    d = int(parts[0])
+                    m = month[parts[1].upper()[:3]]
+                    y_str = parts[2]
+                    y = int(y_str) if len(y_str) == 4 else (2000 + int(y_str) if int(y_str) < 23 else 1900 + int(y_str))
+                elif len(parts) >= 3 and parts[0].isdigit() and len(parts[0]) == 4:
+                    y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
                 else:
-                    y2 = int(y_str)
-                    y = 2000 + y2 if y2 < 23 else 1900 + y2
-            elif len(parts) >= 3 and parts[0].isdigit() and len(parts[0]) == 4:
-                # dạng 'YYYY-MM-DD'
-                y = int(parts[0]); m = int(parts[1]); d = int(parts[2])
-            else:
-                print(f"[WARN] Unrecognized date '{raw}' for {it.name}; skipping")
+                    continue
+                date = y*10000 + m*100 + d
+            except:
                 continue
 
-            date = y*10000 + m*100 + d
-        except Exception as e:
-            print(f"[WARN] Bad date '{raw}' for {it.name}: {e}; skipping")
-            continue
+            if date < TEST_CUTOFF:
+                dates_.append(date)
+                trainset.append(it)
+            else:
+                testset.append(it)
 
-        if date < TEST_CUTOFF:
-            dates_.append(date)
-            trainset.append(it)
-        else:
-            testset.append(it)
+        # Lưu index CV dựa trên thứ tự thời gian (như logic gốc)
+        idx = np.array(dates_).argsort()
 
+    elif args.dataset_type == 'epitope3d':
+        print("[INFO] Đang xử lý tập dữ liệu Epitope3D (Đã chia sẵn Train/Test)...")
+        
+        # Lưu ý: file CSV của tập mới phải nằm trong thư mục args.root
+        # Nếu file ở thư mục gốc, hãy đổi thành f"{args.train_csv}" thay vì f"{root}/{args.train_csv}" trong file utils.py
+        
+        print(f"--> Xử lý tập Train: {args.train_csv}")
+        trainset = initial_epitope3D(args.train_csv, root, model, device)
+        
+        print(f"--> Xử lý tập Test: {args.test_csv}")
+        testset = initial_epitope3D(args.test_csv, root, model, device)
+        
+        # Lọc lại trainset để loại bỏ các chuỗi quá dài hoặc không có nhãn (giống logic cũ)
+        trainset = [i for i in trainset if len(i) < 1024 and getattr(i, 'label', None) is not None and i.label.sum() > 0]
+        testset = [i for i in testset if len(i) < 1024 and getattr(i, 'label', None) is not None and i.label.sum() > 0]
 
+        # Đối với dữ liệu đã chia sẵn, index cross-validation (cho k-fold lúc train) 
+        # ta có thể dùng random shuffle (trộn ngẫu nhiên) để chia đều data vào các fold.
+        np.random.seed(42) # Đặt seed cố định để các fold không bị đổi sau mỗi lần chạy lại
+        idx = np.random.permutation(len(trainset))
+
+    # =========================================================
+    # 6) LƯU CHUNG RA TRAIN.PKL, TEST.PKL VÀ NPY ĐỂ DATASET ĐỌC
+    # =========================================================
     with open(f'{root}/train.pkl','wb') as f:
         pk.dump(trainset, f)
     with open(f'{root}/test.pkl','wb') as f:
         pk.dump(testset, f)
 
-    #idx = np.array(DATES_FOR_CV).argsort()
-    idx = np.array(dates_).argsort()
     np.save(f'{root}/cross-validation.npy', idx)
-    print(f"[INFO] Done. Train: {len(trainset)}, Test: {len(testset)}, CV idx shape: {idx.shape}")
+    print(f"[INFO] TỔNG KẾT -> Train: {len(trainset)} chains, Test: {len(testset)} chains, CV idx shape: {idx.shape}")    
+
+# if __name__ == "__main__":
+#     import pickle as pk
+#     import numpy as np
+#     from tqdm import tqdm
+
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument('--root', type=str, default='./data/BCE_633', help='dataset path')
+#     parser.add_argument('--gpu', type=int, default=0, help='gpu index, -1 for cpu')
+#     parser.add_argument('--esm_size', type=str, default='650M', choices=['150M','650M','3B'],
+#                         help='ESM-2 variant: 150M | 650M | 3B')
+#     parser.add_argument('--cache', type=str, default='/kaggle/working/graphbepi_cache',
+#                         help='TORCH_HOME model cache path')
+#     args = parser.parse_args()
+
+#     # 1) Cache cho ESM (để lần sau không tải lại)
+#     if args.cache:
+#         os.environ['TORCH_HOME'] = args.cache
+#         os.makedirs(args.cache, exist_ok=True)
+#         print(f"[INFO] TORCH_HOME = {os.environ['TORCH_HOME']}")
+
+#     # 2) Bảo đảm thư mục tồn tại (không dùng 'cd && mkdir')
+#     root = args.root
+#     for d in [root, f'{root}/PDB', f'{root}/purePDB', f'{root}/feat', f'{root}/dssp', f'{root}/graph']:
+#         os.makedirs(d, exist_ok=True)
+#     print(f"[INFO] Prepared folders under {root}")
+
+#     # 3) Chọn device an toàn
+#     if args.gpu == -1 or (not torch.cuda.is_available()):
+#         device = 'cpu'
+#     else:
+#         n = torch.cuda.device_count()
+#         device = f'cuda:{args.gpu}' if 0 <= args.gpu < n else 'cpu'
+#     print(f"[INFO] Device: {device}")
+
+#     # 4) Tải ESM-2 (mặc định 650M cho Kaggle)
+#     try:
+#         if args.esm_size == '3B':
+#             print("[INFO] Loading ESM-2 t36_3B_UR50D (large)")
+#             model, _ = esm.pretrained.esm2_t36_3B_UR50D()
+#         elif args.esm_size == '150M':
+#             print("[INFO] Loading ESM-2 t30_150M_UR50D")
+#             model, _ = esm.pretrained.esm2_t30_150M_UR50D()
+#         else:
+#             print("[INFO] Loading ESM-2 t33_650M_UR50D (recommended)")
+#             model, _ = esm.pretrained.esm2_t33_650M_UR50D()
+#     except Exception as e:
+#         print("[ERROR] Failed to load ESM-2:", repr(e))
+#         raise
+
+#     model = model.to(device)
+#     model.eval()
+
+#     # 5) Build dataset (đọc 'total.csv' ở thư mục làm việc hiện tại)
+#     csv_path = 'total.csv'
+#     if not os.path.exists(csv_path):
+#         print(f"[WARN] {csv_path} not found. Check your working directory.")
+#     try:
+#         initial(csv_path, root, model, device)  # hàm trong utils.py
+#     except Exception as e:
+#         print("[ERROR] initial() failed:", repr(e))
+#         raise
+
+#     # 6) Tách train/test theo mốc 2021-04-01
+#     with open(f'{root}/total.pkl','rb') as f:
+#         dataset = pk.load(f)
+#     dates = {i.name: i.date for i in dataset}
+
+#     filt_data = [i for i in dataset if len(i) < 1024 and getattr(i, 'label', None) is not None and i.label.sum() > 0]
+#     month = {'JAN':1,'FEB':2,'MAR':3,'APR':4,'MAY':5,'JUN':6,'JUL':7,'AUG':8,'SEP':9,'OCT':10,'NOV':11,'DEC':12}
+#     trainset, testset, DATES_FOR_CV = [], [], []
+#     TEST_CUTOFF = 20210401
+
+#     TEST_CUTOFF = 20210401  # yyyymmdd
+#     dates_ = []
+#     trainset, testset = [], []
+
+#     for it in filt_data:
+#         raw = str(dates[it.name]).strip()  # ví dụ '11-FEB-21' hoặc '2019-07-03'
+#         # Chuẩn hóa phân tách
+#         parts = re.split(r'[-/\s]+', raw)
+
+#         try:
+#             if len(parts) >= 3 and parts[1].isalpha():
+#                 # dạng 'DD-MON-YY' hoặc 'DD-MON-YYYY'
+#                 d = int(parts[0])
+#                 m = month[parts[1].upper()[:3]]
+#                 y_str = parts[2]
+#                 if len(y_str) == 4:
+#                     y = int(y_str)
+#                 else:
+#                     y2 = int(y_str)
+#                     y = 2000 + y2 if y2 < 23 else 1900 + y2
+#             elif len(parts) >= 3 and parts[0].isdigit() and len(parts[0]) == 4:
+#                 # dạng 'YYYY-MM-DD'
+#                 y = int(parts[0]); m = int(parts[1]); d = int(parts[2])
+#             else:
+#                 print(f"[WARN] Unrecognized date '{raw}' for {it.name}; skipping")
+#                 continue
+
+#             date = y*10000 + m*100 + d
+#         except Exception as e:
+#             print(f"[WARN] Bad date '{raw}' for {it.name}: {e}; skipping")
+#             continue
+
+#         if date < TEST_CUTOFF:
+#             dates_.append(date)
+#             trainset.append(it)
+#         else:
+#             testset.append(it)
+
+
+#     with open(f'{root}/train.pkl','wb') as f:
+#         pk.dump(trainset, f)
+#     with open(f'{root}/test.pkl','wb') as f:
+#         pk.dump(testset, f)
+
+#     #idx = np.array(DATES_FOR_CV).argsort()
+#     idx = np.array(dates_).argsort()
+#     np.save(f'{root}/cross-validation.npy', idx)
+#     print(f"[INFO] Done. Train: {len(trainset)}, Test: {len(testset)}, CV idx shape: {idx.shape}")
 

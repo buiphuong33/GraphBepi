@@ -1,3 +1,4 @@
+# utils.py
 import os
 import torch
 import numpy as np
@@ -212,23 +213,6 @@ def collate_fn(batch):
 def extract_chain(root,pid,chain,force=False):
     if not force and os.path.exists(f'{root}/purePDB/{pid}_{chain}.pdb'):
         return True
-    # if not os.path.exists(f'{root}/PDB/{pid}.pdb'):
-    #     retry=5
-    #     pdb=None
-    #     while retry>0:
-    #         try:
-    #             with rq.get(f'https://files.rcsb.org/download/{pid}.pdb') as f:
-    #                 if f.status_code==200:
-    #                     pdb=f.content
-    #                     break
-    #         except:
-    #             retry-=1
-    #             continue
-    #     if pdb is None:
-    #         print(f'PDB file {pid} failed to download')
-    #         return False
-    #     with open(f'{root}/PDB/{pid}.pdb','wb') as f:
-    #         f.write(pdb)
 
     if not os.path.exists(f'{root}/PDB/{pid}.pdb'):
         os.makedirs(f'{root}/PDB', exist_ok=True)
@@ -303,6 +287,79 @@ def initial(file,root,model=None,device='cpu',from_native_pdb=True):
     with open(f'{root}/total.pkl','wb') as f:
         pk.dump(samples,f)
 
+def initial_epitope3D(file, root, model=None, device='cpu', from_native_pdb=True):
+
+    df = pd.read_csv(f'{root}/{file}', header=0)
+
+    samples = []
+
+    with tqdm(range(len(df))) as tbar:
+        for idx in tbar:
+
+            row = df.iloc[idx]
+            pdb_id = row['PDB ID']
+            label_raw = row['Epitope List (residueid_residuename_chain)']
+
+            if pd.isna(label_raw):
+                continue
+
+            # Gom label theo chain
+            chain_labels = {}
+
+            labels = label_raw.split(', ')
+            for item in labels:
+                # 148_GLN_A
+                parts = item.split('_')
+                if len(parts) != 3:
+                    continue
+
+                site, amino, chain_id = parts
+
+                if chain_id not in chain_labels:
+                    chain_labels[chain_id] = []
+
+                chain_labels[chain_id].append(f"{site}_{amino}")
+
+            for chain_id, label_list in chain_labels.items():
+
+                name = f"{pdb_id}_{chain_id}"
+                tbar.set_postfix(protein=name)
+
+                if from_native_pdb:
+                    state = extract_chain(root, pdb_id, chain_id)
+                    if not state:
+                        continue
+
+                data = chain()
+
+                data.protein_name = pdb_id
+                data.chain_name = chain_id
+                data.name = name
+
+                process_chain(data, root, name, model, device)
+
+                # ---- đảm bảo lấy date từ HEADER ----
+                if data.date == '' or data.date is None:
+                    try:
+                        with open(f"{root}/PDB/{pdb_id}.pdb", "r") as f:
+                            for line in f:
+                                if line.startswith("HEADER"):
+                                    data.date = line[50:59].strip()
+                                    break
+                    except:
+                        data.date = ''
+
+                for j in label_list:
+                    site, amino = j.split('_')
+                    data.update(site, amino)
+
+                samples.append(data)
+
+    output_name = file.replace(".csv", ".pkl")
+    with open(f'{root}/{output_name}', 'wb') as f:
+        pk.dump(samples, f)
+
+    return samples
 
 def export_tabular(root, out_dir="./tabular", split='all'):
     """Export per-residue tabular features for XGBoost.
@@ -393,3 +450,5 @@ if __name__ == '__main__':
     parser.add_argument('--split', type=str, default='all', choices=['train','test','all'])
     args = parser.parse_args()
     export_tabular(args.root, args.out, args.split)
+
+
