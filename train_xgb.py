@@ -5,10 +5,9 @@ import numpy as np
 from utils import export_tabular
 from tool import METRICS
 import joblib
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GroupShuffleSplit # SỬA: Thêm GroupShuffleSplit
 import xgboost as xgb
 import torch
-
 
 
 def load_or_export(root, out_dir, split, use_gnn=False, pca_dim=0):
@@ -37,19 +36,33 @@ def load_or_export(root, out_dir, split, use_gnn=False, pca_dim=0):
 def main(args):
     os.makedirs(args.out, exist_ok=True)
     data = load_or_export(args.root, args.out, args.split, use_gnn=args.use_gnn, pca_dim=args.pca_dim)
+    
     X = data['X']
     y = data['y']
+    names = data['names'] # SỬA: Lấy thêm mảng names chứa ID Protein
 
     # if split='all', we do train/val/test split locally
     if args.split == 'all':
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+        # SỬA: Dùng GroupShuffleSplit để chia Train/Test thay vì train_test_split
+        gss_test = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
+        train_idx, test_idx = next(gss_test.split(X, y, groups=names))
+        X_train, X_test = X[train_idx], X[test_idx]
+        y_train, y_test = y[train_idx], y[test_idx]
+        names_train = names[train_idx]
+        
     elif args.split == 'train':
         # training expects a separate test.npz for final eval
-        X_train, y_train = X, y
+        X_train, y_train, names_train = X, y, names # SỬA: Gắn names_train
         test_path = os.path.join(args.out, 'test_merged.npz' if args.use_gnn else 'test.npz')
+        
         if not os.path.exists(test_path):
             print('[WARN] test.npz not found; final evaluation will be on a held-out val split')
-            X_train, X_test, y_train, y_test = train_test_split(X_train, y_train, test_size=0.2, stratify=y_train, random_state=42)
+            # SỬA: Dùng GroupShuffleSplit nếu không có file test riêng
+            gss_test = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
+            train_idx, test_idx = next(gss_test.split(X_train, y_train, groups=names_train))
+            X_train, X_test = X_train[train_idx], X_train[test_idx]
+            y_train, y_test = y_train[train_idx], y_train[test_idx]
+            names_train = names_train[train_idx]
         else:
             test = np.load(test_path, allow_pickle=True)
             X_test, y_test = test['X'], test['y']
@@ -57,10 +70,17 @@ def main(args):
         raise ValueError('split must be train or all')
 
     # further split X_train->train/val for early stopping
-    X_tr, X_val, y_tr, y_val = train_test_split(X_train, y_train, test_size=0.1, stratify=y_train, random_state=42)
+    # SỬA: Dùng GroupShuffleSplit để chia Train/Val 
+    gss_val = GroupShuffleSplit(n_splits=1, test_size=0.1, random_state=42)
+    tr_idx, val_idx = next(gss_val.split(X_train, y_train, groups=names_train))
+    
+    X_tr, y_tr = X_train[tr_idx], y_train[tr_idx]
+    X_val, y_val = X_train[val_idx], y_train[val_idx]
+    
     pos = (y_tr == 1).sum()
     neg = (y_tr == 0).sum()
     spw = float(neg) / float(pos + 1e-9)
+    print(f"[INFO] Train residues: {len(X_tr)} | Val residues: {len(X_val)}")
     print(f"[INFO] pos={pos} neg={neg} scale_pos_weight={spw:.2f}")
 
     seeds = [int(s.strip()) for s in args.seeds.split(',') if s.strip()]
@@ -105,6 +125,7 @@ def main(args):
             objective='binary:logistic',
             eval_metric=['auc','aucpr'],   
             n_estimators=3000,      
+            early_stopping_rounds=50, # SỬA: Thêm early_stopping_rounds vào lúc khởi tạo mô hình
             learning_rate=hp["learning_rate"],
             max_depth=hp["max_depth"],
             subsample=hp["subsample"],
@@ -114,7 +135,6 @@ def main(args):
             reg_alpha=hp["reg_alpha"],
             gamma=hp["gamma"],
             scale_pos_weight=spw,
-
             tree_method='hist',      
             random_state=seed,
             verbosity=1,
@@ -129,7 +149,7 @@ def main(args):
         if dirn:
             os.makedirs(dirn, exist_ok=True)
         joblib.dump(clf, model_path)
-        print(f"[DONE] Saved model to {model_path}")
+        print(f"[DONE] Saved model to {model_path}. Best iteration: {clf.best_iteration}")
 
         probas.append(clf.predict_proba(X_test)[:, 1])
 
@@ -159,6 +179,6 @@ if __name__ == '__main__':
     parser.add_argument('--use-gnn', action='store_true', help='Use GNN embeddings merged into features')
     parser.add_argument('--pca-dim', type=int, default=10, help='PCA dim for GNN embeddings (fit on train)')
     parser.add_argument('--seeds', type=str, default='42,202,777',
-                    help='Comma-separated random seeds for ensemble (e.g., 42,202,777)')
+                        help='Comma-separated random seeds for ensemble (e.g., 42,202,777)')
     args = parser.parse_args()
     main(args)
