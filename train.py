@@ -90,6 +90,7 @@ if args.gpu == -1 or not torch.cuda.is_available():
         callbacks=cb,
         logger=logger,
         check_val_every_n_epoch=1,
+        enable_progress_bar=False,
     )
 else:
     trainer = pl.Trainer(
@@ -99,6 +100,7 @@ else:
         callbacks=cb,
         logger=logger,
         check_val_every_n_epoch=1,
+        enable_progress_bar=False,
     )
 
 if os.path.exists(f'./model/{log_name}/model_{args.fold}.ckpt'):
