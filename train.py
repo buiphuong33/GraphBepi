@@ -15,6 +15,19 @@ from torch.utils.data import DataLoader,Dataset
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import Callback,EarlyStopping,ModelCheckpoint
 warnings.simplefilter('ignore')
+class SimpleLogCallback(Callback):
+    def on_validation_epoch_end(self, trainer, pl_module):
+        if trainer.sanity_checking:
+            return
+            
+        metrics = trainer.callback_metrics
+        epoch = trainer.current_epoch
+        
+        val_loss = metrics.get('val_loss', torch.tensor(0.0)).item()
+        val_auprc = metrics.get('val_AUPRC', torch.tensor(0.0)).item()
+        
+        print(f"[Epoch {epoch:03d}] Val Loss: {val_loss:.4f} | Val AUPRC: {val_auprc:.4f}")
+
 def seed_everything(seed=2022):
     random.seed(seed)
     os.environ['PYTHONHASHSEED'] = str(seed)
@@ -75,7 +88,8 @@ logger = TensorBoardLogger(
     args.logger, 
     name=log_name+f'_{args.fold}'
 )
-cb=[mc,es]
+simple_log = SimpleLogCallback()
+cb = [mc, es, simple_log]
 # trainer = pl.Trainer(
 #     gpus=[args.gpu] if args.gpu!=-1 else None, 
 #     max_epochs=args.epochs, callbacks=cb,
@@ -91,6 +105,7 @@ if args.gpu == -1 or not torch.cuda.is_available():
         logger=logger,
         check_val_every_n_epoch=1,
         enable_progress_bar=False,
+        enable_model_summary=False,
     )
 else:
     trainer = pl.Trainer(
@@ -101,6 +116,7 @@ else:
         logger=logger,
         check_val_every_n_epoch=1,
         enable_progress_bar=False,
+        enable_model_summary=False,
     )
 
 if os.path.exists(f'./model/{log_name}/model_{args.fold}.ckpt'):
