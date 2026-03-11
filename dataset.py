@@ -106,7 +106,7 @@ if __name__ == "__main__":
                         help='TORCH_HOME model cache path')
     
     # --- THÊM CÁC THAM SỐ CHO DATASET MỚI ---
-    parser.add_argument('--dataset_type', type=str, default='bce633', choices=['bce633', 'epitope3d'],
+    parser.add_argument('--dataset_type', type=str, default='epitope3d', choices=['bce633', 'epitope3d'],
                         help='Chọn loại dữ liệu: bce633 (cũ) hoặc epitope3d (mới)')
     parser.add_argument('--train_csv', type=str, default='epitope3d_dataset_180_train.csv', 
                         help='Tên file CSV train cho tập epitope3d')
